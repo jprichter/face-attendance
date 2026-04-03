@@ -5,6 +5,14 @@ import config
 from monitor import main as monitor_main
 
 
+@pytest.fixture(autouse=True)
+def mock_monitor_infra(mocker):
+    """Mock blocking infrastructure in monitor.py for all tests in this module."""
+    mocker.patch("builtins.input", return_value="n")
+    mocker.patch("monitor.threading.Thread")
+    return
+
+
 def test_full_flow_success(mock_db_conn, mock_deepface, mock_deepface_extract, mock_yunet, mocker):
     # Get mock connection and cursor from fixture
     mock_conn, mock_cur = mock_db_conn
