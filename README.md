@@ -46,7 +46,7 @@ cp .env.example .env
 ## 🚀 How to Use
 
 ### Step 1: Enroll Members
-Organize photos in `data/faces/NAME/` and run:
+Organize photos in `data/faces/your_name/` and run:
 ```bash
 uv run enroll.py --name "Your Name" --folder data/faces/your_name/
 ```
