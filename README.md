@@ -3,12 +3,15 @@
 A real-time automated attendance tracking system using facial recognition. Built with DeepFace, PostgreSQL (pgvector), and Flask.
 
 ## Features
-- **Real-time Recognition**: identify enrolled members via webcam or RTSP stream.
+- **Real-time Recognition**: Identify enrolled members via webcam or RTSP stream.
 - **pgvector Integration**: Efficient vector similarity search for face embeddings.
-- **Robust Enrollment**: Pre-checks DB connections and caches embeddings locally if the database is offline.
+- **Unknown Face Grouping**: Automatically groups unknown faces by embedding similarity so repeat visitors are linked together.
+- **Web Enrollment**: Review unknown face groups in the dashboard and enroll them with one click — no CLI needed.
+- **CLI Enrollment**: Batch-enroll from a folder of photos. `--folder` is optional and auto-generates from `--name`.
+- **Tabbed Dashboard**: Flask interface with an Attendance tab (check-in log with member photo thumbnails) and an Enroll tab (unknown face review queue).
+- **Member Photo Thumbnails**: Captures a face snapshot on first check-in and displays it in the attendance table.
 - **Smart Logging**: 3-frame confirmation logic to prevent false positives and configurable cool-down periods.
-- **Web Dashboard**: Simple Flask interface to view attendance logs in real-time.
-- **Unknown Face Capture**: Automatically logs and saves snapshots of unauthorized/unknown individuals.
+- **Offline Fallback**: Caches enrollment embeddings locally if the database is unreachable.
 
 ---
 
@@ -45,21 +48,35 @@ cp .env.example .env
 
 ## 🚀 How to Use
 
-### Step 1: Enroll Members
-Organize photos in `data/faces/your_name/` and run:
+### Option A: Web Enrollment (recommended)
+
+1. **Start the monitor** — detects faces and groups unknown visitors by similarity:
+   ```bash
+   uv run monitor.py
+   ```
+
+2. **Start the dashboard** (in a separate terminal):
+   ```bash
+   uv run app.py
+   ```
+
+3. **Enroll via the browser** — open http://localhost:5000, click the **Enroll** tab, enter a name for each unknown face group, and click Enroll.
+
+### Option B: CLI Enrollment
+
 ```bash
-uv run enroll.py --name "Your Name" --folder data/faces/your_name/
+# Auto-generate folder from name (creates data/faces/sdiviney/)
+uv run enroll.py --name "Sean Diviney"
+
+# Or specify an existing folder of photos
+uv run enroll.py --name "Sean Diviney" --folder data/faces/sdiviney/
 ```
 
-### Step 2: Run Monitoring
-Start the recognition loop:
+Then start the monitor and dashboard:
 ```bash
 uv run monitor.py
+uv run app.py     # http://localhost:5000
 ```
-*Note: The terminal will provide a link to the Web Log Viewer (usually http://localhost:5000).*
-
-### Step 3: View Logs
-Open your browser to the link provided by `monitor.py` to see the real-time check-in table.
 
 ---
 
@@ -81,11 +98,11 @@ Test results are saved in the `test_results/` directory using the format `{name_
 ---
 
 ## 📂 Project Structure
-- `enroll.py`: Script to add new faces to the DB.
-- `monitor.py`: The core recognition engine.
-- `app.py`: Flask web server for the log viewer.
-- `logger.py`: Database logic for check-ins and unknown faces.
-- `config.py`: Centralized configuration management.
+- `monitor.py`: Core recognition loop — face detection, embedding extraction, pgvector similarity search, unknown face grouping, member photo capture.
+- `enroll.py`: CLI enrollment — processes photos, averages embeddings, stores in DB. Auto-generates folder from name.
+- `app.py`: Flask dashboard — tabbed UI (Attendance + Enroll), serves member photos and unknown face snapshots.
+- `logger.py`: DB operations — check-in logging, unknown detection with group linking, web enrollment, member photo storage.
+- `config.py`: Centralized configuration from `.env`.
 - `bin/`: Setup and utility bash scripts.
 - `docs/`: Design plans, database schema, and user manuals.
 
