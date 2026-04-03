@@ -16,8 +16,9 @@ A real-time automated attendance tracking system using facial recognition. Built
 
 ### 1. Prerequisites
 - **Ubuntu Linux** or **macOS**.
-- **Python 3.10+**.
+- **Python 3.11+**.
 - **PostgreSQL 12+**.
+- **uv**: Modern Python package and project manager. [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 ### 2. Database Setup
 ```bash
@@ -29,22 +30,8 @@ A real-time automated attendance tracking system using facial recognition. Built
 ```
 
 ### 3. Setup Python Virtual Environment and Dependencies
-
-**Option A: install script**
-```bash
-./bin/install_python_deps.sh
-```
-
-**Option B: uv**
 ```bash
 uv sync
-```
-
-**Option C: pip**
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 ```
 
 ### 4. Configuration
@@ -61,21 +48,13 @@ cp .env.example .env
 ### Step 1: Enroll Members
 Organize photos in `data/faces/NAME/` and run:
 ```bash
-# uv
 uv run enroll.py --name "Your Name" --folder data/faces/your_name/
-
-# pip
-python enroll.py --name "Your Name" --folder data/faces/your_name/
 ```
 
 ### Step 2: Run Monitoring
 Start the recognition loop:
 ```bash
-# uv
 uv run monitor.py
-
-# pip (activate venv first: source .venv/bin/activate)
-python monitor.py
 ```
 *Note: The terminal will provide a link to the Web Log Viewer (usually http://localhost:5000).*
 
@@ -89,17 +68,13 @@ The project uses `pytest` for its test suite. Configuration is handled in `pytes
 
 To run the entire suite:
 ```bash
-# uv
 uv run pytest
-
-# pip (activate venv first: source .venv/bin/activate)
-pytest
 ```
 
 To run specific test categories:
-- **Unit Tests**: `pytest tests/test_logger.py tests/test_enroll.py`
-- **Web Tests**: `pytest tests/test_app.py`
-- **E2E Tests**: `pytest tests/test_e2e.py`
+- **Unit Tests**: `uv run pytest tests/test_logger.py tests/test_enroll.py`
+- **Web Tests**: `uv run pytest tests/test_app.py`
+- **E2E Tests**: `uv run pytest tests/test_e2e.py`
 
 Test results are saved in the `test_results/` directory using the format `{name_of_test}-{timestamp}.txt`.
 
