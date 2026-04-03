@@ -1,9 +1,11 @@
 __pycache__/
+.codex
 .claude/
 .env
 .history/
 .venv/
 CLAUDE.md
+data/members/
 data/unknown/
 docs/
 enrollment_cache.json

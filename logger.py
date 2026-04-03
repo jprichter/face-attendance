@@ -8,6 +8,8 @@ import psycopg2
 
 import config
 
+_SCHEMA_READY = False
+
 
 def get_connection():
     return psycopg2.connect(
@@ -19,6 +21,32 @@ def get_connection():
     )
 
 
+def ensure_schema(conn):
+    """Apply non-destructive schema upgrades required by newer app features."""
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
+
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "ALTER TABLE members "
+            "ADD COLUMN IF NOT EXISTS image_path TEXT"
+        )
+        cur.execute(
+            "ALTER TABLE unknown_detections "
+            "ADD COLUMN IF NOT EXISTS image_path TEXT"
+        )
+        cur.execute(
+            "ALTER TABLE unknown_detections "
+            "ADD COLUMN IF NOT EXISTS group_id UUID"
+        )
+        conn.commit()
+        _SCHEMA_READY = True
+    finally:
+        cur.close()
+
+
 @contextmanager
 def _db_cursor(*, commit=False):
     """Yield a DB cursor, optionally committing on success.
@@ -26,6 +54,7 @@ def _db_cursor(*, commit=False):
     Rolls back on exception, always closes the connection.
     """
     conn = get_connection()
+    ensure_schema(conn)
     try:
         cur = conn.cursor()
         yield cur
