@@ -1,4 +1,5 @@
 import os
+import psycopg2
 import threading
 import uuid
 from datetime import datetime
@@ -10,7 +11,6 @@ from deepface import DeepFace
 import config
 from app import app
 from logger import (
-    get_connection,
     find_matching_unknown_group,
     log_check_in,
     log_unknown_detection,
@@ -20,6 +20,18 @@ from logger import (
 FACE_CONFIDENCE_THRESHOLD = 0.6
 
 
+def _materialize_image(image):
+    """Return a detached contiguous uint8 image buffer for OpenCV file writes."""
+    if image is None:
+        return None
+
+    safe = image
+    if safe.dtype != np.uint8:
+        safe = np.clip(safe, 0, 255).astype(np.uint8)
+
+    return np.ascontiguousarray(safe.copy())
+
+
 def normalize_frame(frame):
     """Apply histogram equalization to the luminance channel."""
     yuv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
@@ -27,11 +39,24 @@ def normalize_frame(frame):
     return cv2.cvtColor(yuv_frame, cv2.COLOR_YUV2BGR)
 
 
+def get_connection():
+    try:
+        return psycopg2.connect(
+            host=config.DB_HOST,
+            database=config.DB_NAME,
+            user=config.DB_USER,
+            password=config.DB_PASS,
+            port=config.DB_PORT,
+            connect_timeout=5,
+        )
+    except Exception:
+        return None
+
+
 def query_database(embedding):
     """Find the closest member by cosine distance. Returns (member_id, name, distance)."""
-    try:
-        conn = get_connection()
-    except Exception:
+    conn = get_connection()
+    if not conn:
         return None, "DB Error", None
     try:
         cur = conn.cursor()
@@ -95,8 +120,10 @@ def handle_recognition(embedding, confirmation_buffer, image_to_save):
             if checked_in:
                 image_path = os.path.join(config.MEMBER_FACES_DIR, f"member_{member_id}.jpg")
                 if not os.path.exists(image_path):
-                    cv2.imwrite(image_path, image_to_save)
-                    save_member_image(member_id, image_path)
+                    safe_image = _materialize_image(image_to_save)
+                    if safe_image is not None:
+                        cv2.imwrite(image_path, safe_image)
+                        save_member_image(member_id, image_path)
             confirmation_buffer["count"] = 0
 
     elif name == "Unknown":
@@ -110,7 +137,9 @@ def handle_recognition(embedding, confirmation_buffer, image_to_save):
             print("Unknown face detected (no members enrolled)")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         image_path = os.path.join(config.UNKNOWN_FACES_DIR, f"unknown_{timestamp}.jpg")
-        cv2.imwrite(image_path, image_to_save)
+        safe_image = _materialize_image(image_to_save)
+        if safe_image is not None:
+            cv2.imwrite(image_path, safe_image)
         log_unknown_detection(embedding, image_path, group_id)
         confirmation_buffer["id"] = None
         confirmation_buffer["count"] = 0
@@ -190,9 +219,11 @@ def process_frame_single_stage(frame, confirmation_buffer):
             return frame
 
         embedding, face_data = result
-        name = handle_recognition(embedding, confirmation_buffer, frame)
-
         region = face_data["facial_area"]
+        face_crop = frame[region["y"]:region["y"] + region["h"], region["x"]:region["x"] + region["w"]]
+        safe_face_crop = _materialize_image(face_crop)
+        name = handle_recognition(embedding, confirmation_buffer, safe_face_crop if safe_face_crop is not None else frame)
+
         cv2.rectangle(
             frame,
             (region["x"], region["y"]),
@@ -223,7 +254,6 @@ def process_frame_two_stage(frame, yunet, confirmation_buffer):
     display_scale_y = config.DISPLAY_HEIGHT / orig_h
 
     _, faces_detected = yunet.detect(detection_frame)
-
     if faces_detected is None:
         return display_frame
 
@@ -241,7 +271,7 @@ def process_frame_two_stage(frame, yunet, confirmation_buffer):
                 continue
 
             embedding, _ = result
-            name = handle_recognition(embedding, confirmation_buffer, face_crop)
+            name = handle_recognition(embedding, confirmation_buffer, _materialize_image(face_crop))
 
             dx1 = int(x1 * display_scale_x)
             dy1 = int(y1 * display_scale_y)
