@@ -29,7 +29,8 @@ else:
     CAMERA_SOURCE = source
 
 # Web Configuration
-FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
+flask_port_str = os.getenv("FLASK_PORT", "5000")
+FLASK_PORT = int(flask_port_str) if flask_port_str.strip() else 5000
 
 # DeepFace Model Configuration
 # Facenet512 matches the 512-dimension vector in our DB schema
@@ -40,13 +41,21 @@ ENFORCE_DETECTION = False
 ALIGN = True
 
 # Two-stage detection configuration
-DETECTION_WIDTH = int(os.getenv("DETECTION_WIDTH", "640"))
-DETECTION_HEIGHT = int(os.getenv("DETECTION_HEIGHT", "360"))
-DISPLAY_WIDTH = int(os.getenv("DISPLAY_WIDTH", "960"))
-DISPLAY_HEIGHT = int(os.getenv("DISPLAY_HEIGHT", "540"))
-YUNET_SCORE_THRESHOLD = float(os.getenv("YUNET_SCORE_THRESHOLD", "0.5"))
-YUNET_NMS_THRESHOLD = float(os.getenv("YUNET_NMS_THRESHOLD", "0.3"))
+def get_env_int(name, default):
+    val = os.getenv(name, "")
+    return int(val) if val.strip() else default
+
+def get_env_float(name, default):
+    val = os.getenv(name, "")
+    return float(val) if val.strip() else default
+
+DETECTION_WIDTH = get_env_int("DETECTION_WIDTH", 640)
+DETECTION_HEIGHT = get_env_int("DETECTION_HEIGHT", 360)
+DISPLAY_WIDTH = get_env_int("DISPLAY_WIDTH", 960)
+DISPLAY_HEIGHT = get_env_int("DISPLAY_HEIGHT", 540)
+YUNET_SCORE_THRESHOLD = get_env_float("YUNET_SCORE_THRESHOLD", 0.5)
+YUNET_NMS_THRESHOLD = get_env_float("YUNET_NMS_THRESHOLD", 0.3)
 YUNET_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "face_detection_yunet_2023mar.onnx")
 
 # Face crop padding multiplier (1.5 = 50% padding around detected face)
-FACE_CROP_PADDING = float(os.getenv("FACE_CROP_PADDING", "1.5"))
+FACE_CROP_PADDING = get_env_float("FACE_CROP_PADDING", 1.5)

@@ -1,5 +1,6 @@
 import os
 import signal
+import threading
 from datetime import datetime
 
 import cv2
@@ -8,6 +9,7 @@ import psycopg2
 from deepface import DeepFace
 
 import config
+from app import app
 from logger import log_check_in, log_unknown_detection
 
 FACE_CONFIDENCE_THRESHOLD = 0.6
@@ -261,15 +263,26 @@ def process_frame_two_stage(frame, yunet, confirmation_buffer):
     return display_frame
 
 
+def start_web_server():
+    """Start the Flask web server in a background thread."""
+    try:
+        app.run(host="0.0.0.0", port=config.FLASK_PORT, debug=False, use_reloader=False)
+    except Exception as e:
+        print(f"Failed to start web server: {e}")
+
+
 def main():
     global running
     running = True
     signal.signal(signal.SIGINT, signal_handler)
 
+    # Start Flask dashboard in the background
+    web_thread = threading.Thread(target=start_web_server, daemon=True)
+    web_thread.start()
+
     print(f"\n--- Face Attendance Monitoring ---")
     print(f"Log Viewer available at: http://localhost:{config.FLASK_PORT}")
     print(f"Press 'q' in the camera window or Ctrl+C to exit.\n")
-
     cap = cv2.VideoCapture(config.CAMERA_SOURCE)
     if not cap.isOpened():
         print(f"Error: Could not open camera {config.CAMERA_SOURCE}.")
