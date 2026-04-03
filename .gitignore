@@ -1,6 +1,11 @@
-.history/
-.venv
-test_results/
 __pycache__/
+.claude/
+.env
+.history/
+.venv/
+CLAUDE.md
+data/unknown/
 docs/
+enrollment_cache.json
 models/*.onnx
+test_results/

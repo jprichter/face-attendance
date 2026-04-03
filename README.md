@@ -19,21 +19,35 @@ A real-time automated attendance tracking system using facial recognition. Built
 - **Python 3.10+**.
 - **PostgreSQL 12+**.
 
-### 2. Automated Installation
-We've provided scripts to handle the heavy lifting:
-
+### 2. Database Setup
 ```bash
-# 1. Install Postgres, pgvector, and setup the schema
+# Install Postgres, pgvector, and setup the schema
 ./bin/setup_postgres.sh
 
-# 2. Fix Database Authentication (if you get password errors)
+# Fix Database Authentication (if you get password errors)
 ./bin/fix_db_auth.sh
+```
 
-# 3. Setup Python Virtual Environment and Dependencies
+### 3. Setup Python Virtual Environment and Dependencies
+
+**Option A: install script**
+```bash
 ./bin/install_python_deps.sh
 ```
 
-### 3. Configuration
+**Option B: uv**
+```bash
+uv sync
+```
+
+**Option C: pip**
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 4. Configuration
 Copy the example environment file and adjust your settings (DB credentials, camera source, etc.):
 ```bash
 cp .env.example .env
@@ -47,13 +61,20 @@ cp .env.example .env
 ### Step 1: Enroll Members
 Organize photos in `data/faces/NAME/` and run:
 ```bash
-source .venv/bin/activate
+# uv
+uv run enroll.py --name "Your Name" --folder data/faces/your_name/
+
+# pip
 python enroll.py --name "Your Name" --folder data/faces/your_name/
 ```
 
 ### Step 2: Run Monitoring
 Start the recognition loop:
 ```bash
+# uv
+uv run monitor.py
+
+# pip (activate venv first: source .venv/bin/activate)
 python monitor.py
 ```
 *Note: The terminal will provide a link to the Web Log Viewer (usually http://localhost:5000).*
@@ -68,7 +89,10 @@ The project uses `pytest` for its test suite. Configuration is handled in `pytes
 
 To run the entire suite:
 ```bash
-source .venv/bin/activate
+# uv
+uv run pytest
+
+# pip (activate venv first: source .venv/bin/activate)
 pytest
 ```
 
@@ -94,3 +118,4 @@ Test results are saved in the `test_results/` directory using the format `{name_
 
 ## 👥 Contributors
 - jprichter
+- sdiviney
