@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS members (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     face_embedding vector(512),
-    enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    image_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS attendance_log (
@@ -76,7 +77,8 @@ CREATE TABLE IF NOT EXISTS unknown_detections (
     id SERIAL PRIMARY KEY,
     detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     face_embedding vector(512),
-    image_path TEXT
+    image_path TEXT,
+    group_id UUID
 );
 EOF
 

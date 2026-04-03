@@ -1,40 +1,23 @@
 import os
-import signal
 import threading
+import uuid
 from datetime import datetime
 
 import cv2
 import numpy as np
-import psycopg2
 from deepface import DeepFace
 
 import config
 from app import app
-from logger import log_check_in, log_unknown_detection
+from logger import (
+    get_connection,
+    find_matching_unknown_group,
+    log_check_in,
+    log_unknown_detection,
+    save_member_image,
+)
 
 FACE_CONFIDENCE_THRESHOLD = 0.6
-
-running = True
-
-
-def signal_handler(sig, frame):
-    global running
-    print("\nStopping monitoring...")
-    running = False
-
-
-def get_connection():
-    try:
-        return psycopg2.connect(
-            host=config.DB_HOST,
-            database=config.DB_NAME,
-            user=config.DB_USER,
-            password=config.DB_PASS,
-            port=config.DB_PORT,
-            connect_timeout=5,
-        )
-    except Exception:
-        return None
 
 
 def normalize_frame(frame):
@@ -46,8 +29,9 @@ def normalize_frame(frame):
 
 def query_database(embedding):
     """Find the closest member by cosine distance. Returns (member_id, name, distance)."""
-    conn = get_connection()
-    if not conn:
+    try:
+        conn = get_connection()
+    except Exception:
         return None, "DB Error", None
     try:
         cur = conn.cursor()
@@ -107,15 +91,27 @@ def handle_recognition(embedding, confirmation_buffer, image_to_save):
 
         if confirmation_buffer["count"] >= config.CONFIRMATION_FRAMES:
             print(f"Confirmed match: {name} (Dist: {distance:.4f})")
-            log_check_in(member_id)
+            checked_in = log_check_in(member_id)
+            if checked_in:
+                image_path = os.path.join(config.MEMBER_FACES_DIR, f"member_{member_id}.jpg")
+                if not os.path.exists(image_path):
+                    cv2.imwrite(image_path, image_to_save)
+                    save_member_image(member_id, image_path)
             confirmation_buffer["count"] = 0
 
-    elif distance is not None and distance >= config.RECOGNITION_THRESHOLD:
-        print(f"Unknown face detected (Distance: {distance:.4f})")
+    elif name == "Unknown":
+        group_id = find_matching_unknown_group(embedding)
+        if group_id is None:
+            group_id = str(uuid.uuid4())
+
+        if distance is not None:
+            print(f"Unknown face detected (Distance: {distance:.4f})")
+        else:
+            print("Unknown face detected (no members enrolled)")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         image_path = os.path.join(config.UNKNOWN_FACES_DIR, f"unknown_{timestamp}.jpg")
         cv2.imwrite(image_path, image_to_save)
-        log_unknown_detection(embedding, image_path)
+        log_unknown_detection(embedding, image_path, group_id)
         confirmation_buffer["id"] = None
         confirmation_buffer["count"] = 0
 
@@ -168,7 +164,7 @@ def create_yunet_detector():
 
 def map_face_to_original(face, det_w, det_h, orig_w, orig_h):
     """Map YuNet detection from small frame to original coordinates with padding."""
-    x, y, w, h = face[0], face[1], face[2], face[3]
+    x, y, w, h = face[:4]
     scale_x = orig_w / det_w
     scale_y = orig_h / det_h
 
@@ -272,18 +268,16 @@ def start_web_server():
 
 
 def main():
-    global running
-    running = True
-    signal.signal(signal.SIGINT, signal_handler)
-
-    # Start Flask dashboard in the background
     web_thread = threading.Thread(target=start_web_server, daemon=True)
     web_thread.start()
 
-    print(f"\n--- Face Attendance Monitoring ---")
+    print("\n--- Face Attendance Monitoring ---")
     print(f"Log Viewer available at: http://localhost:{config.FLASK_PORT}")
-    print(f"Press 'q' in the camera window or Ctrl+C to exit.\n")
+    print("Press 'q' in the camera window or Ctrl+C to exit.\n")
+
     cap = cv2.VideoCapture(config.CAMERA_SOURCE)
+    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
     if not cap.isOpened():
         print(f"Error: Could not open camera {config.CAMERA_SOURCE}.")
         return
@@ -305,21 +299,25 @@ def main():
         print(f"Low-res source ({orig_w}x{orig_h}) — using single-stage pipeline")
 
     confirmation_buffer = {"id": None, "count": 0}
+    running = True
 
-    while running:
-        if use_two_stage:
-            display = process_frame_two_stage(frame, yunet, confirmation_buffer)
-        else:
-            display = process_frame_single_stage(frame, confirmation_buffer)
+    try:
+        while running:
+            if use_two_stage:
+                display = process_frame_two_stage(frame, yunet, confirmation_buffer)
+            else:
+                display = process_frame_single_stage(frame, confirmation_buffer)
 
-        cv2.imshow("Face Attendance Monitoring", display)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            running = False
+            cv2.imshow("Face Attendance Monitoring", display)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                running = False
 
-        ret, frame = cap.read()
-        if not ret:
-            print("Error: Could not read frame.")
-            break
+            ret, frame = cap.read()
+            if not ret:
+                print("Error: Could not read frame.")
+                break
+    except KeyboardInterrupt:
+        print("\nStopping monitoring...")
 
     cap.release()
     cv2.destroyAllWindows()
