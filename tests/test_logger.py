@@ -1,13 +1,16 @@
-import pytest
 from datetime import datetime
 
+import pytest
+
 from logger import (
+    archive_old_attendance,
+    dismiss_unknown_group,
+    enroll_from_unknown,
+    find_matching_unknown_group,
+    get_attendance_logs,
+    get_unknown_groups,
     log_check_in,
     log_unknown_detection,
-    find_matching_unknown_group,
-    get_unknown_groups,
-    enroll_from_unknown,
-    dismiss_unknown_group,
     save_member_image,
 )
 
@@ -159,3 +162,36 @@ def test_save_member_image_already_exists(mock_db_conn):
     result = save_member_image(101, "data/members/member_101.jpg")
 
     assert result is False
+
+
+def test_get_attendance_logs_filters_by_session(mock_db_conn, mocker):
+    """get_attendance_logs passes session window cutoff to the query."""
+    mocker.patch("logger.config.SESSION_DURATION_MINUTES", 90)
+    _mock_connect, mock_cur = mock_db_conn
+    mock_cur.fetchall.return_value = []
+    get_attendance_logs()
+    sql = mock_cur.execute.call_args[0][0]
+    assert "check_in_time >" in sql
+
+
+def test_archive_old_attendance(mock_db_conn, mocker):
+    """archive_old_attendance moves expired records to archive table."""
+    mocker.patch("logger.config.SESSION_DURATION_MINUTES", 90)
+    _mock_connect, mock_cur = mock_db_conn
+    mock_cur.rowcount = 3
+    result = archive_old_attendance()
+    assert result == 3
+    calls = [str(c) for c in mock_cur.execute.call_args_list]
+    assert any("INSERT INTO attendance_archive" in c for c in calls)
+    assert any("DELETE FROM attendance_log" in c for c in calls)
+
+
+def test_archive_old_attendance_nothing_to_archive(mock_db_conn, mocker):
+    """archive_old_attendance skips DELETE when nothing to archive."""
+    mocker.patch("logger.config.SESSION_DURATION_MINUTES", 90)
+    _mock_connect, mock_cur = mock_db_conn
+    mock_cur.rowcount = 0
+    result = archive_old_attendance()
+    assert result == 0
+    calls = [str(c) for c in mock_cur.execute.call_args_list]
+    assert not any("DELETE FROM attendance_log" in c for c in calls)
