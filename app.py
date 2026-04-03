@@ -1,16 +1,31 @@
+import threading
+import time
 from datetime import datetime
 
 from flask import Flask, render_template, request, jsonify, send_from_directory
 
 import config
 from logger import (
+    archive_old_attendance,
+    dismiss_unknown_group,
+    enroll_from_unknown,
+    ensure_archive_table,
     get_attendance_logs,
     get_unknown_groups,
-    enroll_from_unknown,
-    dismiss_unknown_group,
 )
 
 app = Flask(__name__)
+
+
+def _run_archive_loop():
+    """Periodically archive expired attendance records."""
+    while True:
+        time.sleep(config.ARCHIVE_INTERVAL_MINUTES * 60)
+        archive_old_attendance()
+
+
+ensure_archive_table()
+threading.Thread(target=_run_archive_loop, daemon=True).start()
 
 
 @app.route('/')

@@ -38,6 +38,21 @@ def _db_cursor(*, commit=False):
         conn.close()
 
 
+def ensure_archive_table():
+    """Create attendance_archive table if it doesn't exist."""
+    try:
+        with _db_cursor(commit=True) as cur:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS attendance_archive ("
+                "id INTEGER PRIMARY KEY, "
+                "member_id INTEGER REFERENCES members(id) ON DELETE CASCADE, "
+                "check_in_time TIMESTAMP, "
+                "archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+            )
+    except Exception as exc:
+        print(f"Error creating archive table: {exc}")
+
+
 def log_check_in(member_id):
     try:
         with _db_cursor(commit=True) as cur:
@@ -131,20 +146,47 @@ def get_unknown_groups():
 
 
 def get_attendance_logs(limit=100):
-    """Fetch recent attendance logs with member info for the dashboard."""
+    """Fetch current attendance — members checked in within the session window."""
     try:
         with _db_cursor() as cur:
+            cutoff = datetime.now() - timedelta(minutes=config.SESSION_DURATION_MINUTES)
             cur.execute(
                 "SELECT m.image_path, m.name, a.check_in_time "
                 "FROM attendance_log a "
                 "JOIN members m ON a.member_id = m.id "
+                "WHERE a.check_in_time > %s "
                 "ORDER BY a.check_in_time DESC LIMIT %s",
-                (limit,),
+                (cutoff, limit),
             )
             return cur.fetchall()
-    except Exception as e:
-        print(f"Error fetching attendance logs: {e}")
+    except Exception as exc:
+        print(f"Error fetching attendance logs: {exc}")
         return []
+
+
+def archive_old_attendance():
+    """Move attendance records older than the session window to the archive table."""
+    try:
+        with _db_cursor(commit=True) as cur:
+            cutoff = datetime.now() - timedelta(minutes=config.SESSION_DURATION_MINUTES)
+            cur.execute(
+                "INSERT INTO attendance_archive (id, member_id, check_in_time) "
+                "SELECT id, member_id, check_in_time "
+                "FROM attendance_log "
+                "WHERE check_in_time <= %s",
+                (cutoff,),
+            )
+            archived = cur.rowcount
+            if archived:
+                cur.execute(
+                    "DELETE FROM attendance_log WHERE check_in_time <= %s",
+                    (cutoff,),
+                )
+                print(f"Archived {archived} attendance record(s).")
+            return archived
+    except Exception as exc:
+        print(f"Error archiving attendance records: {exc}")
+        return 0
 
 
 def _delete_snapshot_files(image_paths):

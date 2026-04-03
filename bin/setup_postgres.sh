@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS attendance_log (
     check_in_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS attendance_archive (
+    id INTEGER PRIMARY KEY,
+    member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+    check_in_time TIMESTAMP,
+    archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS unknown_detections (
     id SERIAL PRIMARY KEY,
     detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

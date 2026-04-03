@@ -31,7 +31,7 @@ def test_index_no_logs(client, mocker):
 
     response = client.get('/')
     assert response.status_code == 200
-    assert b"No logs found" in response.data
+    assert b"No one is currently here" in response.data
 
 
 def test_enroll_success(client, mocker):
