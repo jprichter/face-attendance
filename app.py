@@ -11,6 +11,7 @@ from logger import (
     enroll_from_unknown,
     ensure_archive_table,
     get_attendance_logs,
+    get_member_names,
     get_unknown_groups,
 )
 
@@ -31,8 +32,15 @@ threading.Thread(target=_run_archive_loop, daemon=True).start()
 @app.route('/')
 def index():
     logs = get_attendance_logs()
+    member_names = get_member_names()
     unknown_groups = get_unknown_groups()
-    return render_template('index.html', logs=logs, unknown_groups=unknown_groups, now=datetime.now())
+    return render_template(
+        'index.html',
+        logs=logs,
+        member_names=member_names,
+        unknown_groups=unknown_groups,
+        now=datetime.now(),
+    )
 
 
 @app.route('/snapshots/<filename>')
@@ -48,25 +56,36 @@ def serve_member_photo(filename):
 @app.route('/enroll', methods=['POST'])
 def enroll():
     data = request.get_json()
+    detection_ids = data.get('detection_ids') if data else None
     if not data or not data.get('group_id') or not data.get('name', '').strip():
         return jsonify({"error": "Missing name or group_id"}), 400
+    if not isinstance(detection_ids, list) or not detection_ids:
+        return jsonify({"error": "Select at least one photo"}), 400
 
-    member_id = enroll_from_unknown(data['group_id'], data['name'].strip())
-    if member_id is None:
-        return jsonify({"error": "No detections found for group_id"}), 404
+    result = enroll_from_unknown(data['group_id'], data['name'].strip(), detection_ids)
+    if result is None:
+        return jsonify({"error": "No selected detections found for group_id"}), 404
 
-    return jsonify({"success": True, "member_id": member_id, "name": data['name'].strip()})
+    return jsonify({
+        "success": True,
+        "member_id": result["member_id"],
+        "name": data['name'].strip(),
+        "action": result["action"],
+    })
 
 
 @app.route('/dismiss', methods=['POST'])
 def dismiss():
     data = request.get_json()
+    detection_ids = data.get('detection_ids') if data else None
     if not data or not data.get('group_id'):
         return jsonify({"error": "Missing group_id"}), 400
+    if not isinstance(detection_ids, list) or not detection_ids:
+        return jsonify({"error": "Select at least one photo"}), 400
 
-    success = dismiss_unknown_group(data['group_id'])
+    success = dismiss_unknown_group(data['group_id'], detection_ids)
     if not success:
-        return jsonify({"error": "Failed to dismiss group"}), 500
+        return jsonify({"error": "Failed to dismiss selected photos"}), 500
 
     return jsonify({"success": True})
 

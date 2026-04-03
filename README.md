@@ -55,7 +55,7 @@ cp .env.example .env
    uv run monitor.py
    ```
 
-2. **Start the dashboard** (in a separate terminal):
+2. **Start the dashboard** in a separate terminal:
    ```bash
    uv run app.py
    ```
@@ -72,7 +72,7 @@ uv run enroll.py --name "Sean Diviney"
 uv run enroll.py --name "Sean Diviney" --folder data/faces/sdiviney/
 ```
 
-Then start the monitor and dashboard:
+Then start the monitor and dashboard in separate terminals:
 ```bash
 uv run monitor.py
 uv run app.py     # http://localhost:5000

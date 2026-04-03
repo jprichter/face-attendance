@@ -10,8 +10,11 @@
         body { background-color: #f8f9fa; }
         .container { margin-top: 30px; }
         .header { margin-bottom: 20px; border-bottom: 2px solid #dee2e6; padding-bottom: 15px; }
-        .unknown-card img { width: 100%; height: 200px; object-fit: cover; border-radius: 4px; }
         .unknown-card { margin-bottom: 20px; }
+        .detection-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .detection-option { border: 1px solid #dee2e6; border-radius: 8px; padding: 8px; background: #fff; }
+        .detection-option img { width: 100%; height: 140px; object-fit: cover; border-radius: 6px; margin-top: 8px; }
+        .selection-summary { font-size: 0.9rem; color: #6c757d; margin-bottom: 12px; }
     </style>
 </head>
 <body>
@@ -19,6 +22,12 @@
         <div class="header">
             <h1 class="display-4">Face Attendance</h1>
         </div>
+
+        <datalist id="member-name-options">
+            {% for member in member_names %}
+            <option value="{{ member[1] }}"></option>
+            {% endfor %}
+        </datalist>
 
         <ul class="nav nav-tabs mb-4" id="mainTabs" role="tablist">
             <li class="nav-item" role="presentation">
@@ -76,27 +85,54 @@
                 {% if unknown_groups %}
                     <div class="row">
                         {% for group in unknown_groups %}
-                        <div class="col-md-4 col-lg-3">
+                        <div class="col-md-6 col-xl-4">
                             <div class="card unknown-card shadow-sm">
-                                <img src="/snapshots/{{ group[1].split('/')[-1] }}" class="card-img-top" alt="Unknown face">
                                 <div class="card-body">
                                     <p class="card-text mb-1">
-                                        <strong>Seen:</strong> {{ group[2] }} time{{ 's' if group[2] != 1 else '' }}
+                                        <strong>Seen:</strong> {{ group.seen_count }} time{{ 's' if group.seen_count != 1 else '' }}
                                     </p>
                                     <p class="card-text mb-1">
-                                        <small class="text-muted">First: {{ group[3].strftime('%I:%M %p') }}</small>
+                                        <small class="text-muted">First: {{ group.first_seen.strftime('%I:%M %p') }}</small>
                                     </p>
-                                    {% if group[2] > 1 %}
+                                    {% if group.seen_count > 1 %}
                                     <p class="card-text mb-2">
-                                        <small class="text-muted">Last: {{ group[4].strftime('%I:%M %p') }}</small>
+                                        <small class="text-muted">Last: {{ group.last_seen.strftime('%I:%M %p') }}</small>
                                     </p>
                                     {% endif %}
+                                    <div class="selection-summary" id="selection-summary-{{ group.group_id }}"></div>
+                                    <div class="detection-grid">
+                                        {% for detection in group.detections %}
+                                        <label class="detection-option">
+                                            <div>
+                                                <input
+                                                    type="checkbox"
+                                                    class="form-check-input detection-checkbox"
+                                                    data-group-id="{{ group.group_id }}"
+                                                    value="{{ detection.id }}"
+                                                    checked
+                                                    onchange="updateSelectionSummary('{{ group.group_id }}')"
+                                                >
+                                                <span>Select photo</span>
+                                            </div>
+                                            <img src="/snapshots/{{ detection.image_path.split('/')[-1] }}" alt="Unknown face">
+                                            <div class="mt-2">
+                                                <small class="text-muted">{{ detection.detected_at.strftime('%I:%M:%S %p') }}</small>
+                                            </div>
+                                        </label>
+                                        {% endfor %}
+                                    </div>
                                     <div class="input-group mb-2">
-                                        <input type="text" class="form-control form-control-sm" placeholder="Name" id="name-{{ group[0] }}">
+                                        <input
+                                            type="text"
+                                            class="form-control form-control-sm"
+                                            placeholder="Name"
+                                            id="name-{{ group.group_id }}"
+                                            list="member-name-options"
+                                        >
                                     </div>
                                     <div class="d-flex gap-2">
-                                        <button class="btn btn-success btn-sm flex-fill" onclick="enrollFace('{{ group[0] }}')">Enroll</button>
-                                        <button class="btn btn-outline-danger btn-sm flex-fill" onclick="dismissFace('{{ group[0] }}')">Dismiss</button>
+                                        <button class="btn btn-success btn-sm flex-fill" onclick="enrollFace('{{ group.group_id }}')">Enroll Selected</button>
+                                        <button class="btn btn-outline-danger btn-sm flex-fill" onclick="dismissFace('{{ group.group_id }}')">Dismiss Selected</button>
                                     </div>
                                 </div>
                             </div>
@@ -118,23 +154,65 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        const ACTIVE_TAB_KEY = 'face-attendance-active-tab';
+
+        function setActiveTab(tabId) {
+            localStorage.setItem(ACTIVE_TAB_KEY, tabId);
+        }
+
+        function restoreActiveTab() {
+            const savedTab = window.location.hash || localStorage.getItem(ACTIVE_TAB_KEY);
+            if (!savedTab) {
+                return;
+            }
+
+            const tabButton = document.querySelector(`[data-bs-target="${savedTab}"]`);
+            if (tabButton) {
+                bootstrap.Tab.getOrCreateInstance(tabButton).show();
+            }
+        }
+
+        function getSelectedDetectionIds(groupId) {
+            return Array.from(document.querySelectorAll(`.detection-checkbox[data-group-id="${groupId}"]:checked`))
+                .map(input => Number(input.value));
+        }
+
+        function updateSelectionSummary(groupId) {
+            const selectedCount = getSelectedDetectionIds(groupId).length;
+            const totalCount = document.querySelectorAll(`.detection-checkbox[data-group-id="${groupId}"]`).length;
+            const summary = document.getElementById('selection-summary-' + groupId);
+            if (summary) {
+                summary.textContent = `${selectedCount} of ${totalCount} photos selected`;
+            }
+        }
+
         function enrollFace(groupId) {
             const nameInput = document.getElementById('name-' + groupId);
             const name = nameInput.value.trim();
+            const detectionIds = getSelectedDetectionIds(groupId);
             if (!name) {
                 nameInput.classList.add('is-invalid');
                 return;
             }
             nameInput.classList.remove('is-invalid');
+            if (!detectionIds.length) {
+                alert('Select at least one photo to enroll.');
+                return;
+            }
 
             fetch('/enroll', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ group_id: groupId, name: name })
+                body: JSON.stringify({ group_id: groupId, name: name, detection_ids: detectionIds })
             })
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
+                    setActiveTab('#enroll');
+                    const message = data.action === 'updated'
+                        ? `Added photos to existing member ${data.name}.`
+                        : `Created member ${data.name}.`;
+                    alert(message);
                     location.reload();
                 } else {
                     alert('Error: ' + (data.error || 'Unknown error'));
@@ -144,14 +222,20 @@
         }
 
         function dismissFace(groupId) {
+            const detectionIds = getSelectedDetectionIds(groupId);
+            if (!detectionIds.length) {
+                alert('Select at least one photo to dismiss.');
+                return;
+            }
             fetch('/dismiss', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ group_id: groupId })
+                body: JSON.stringify({ group_id: groupId, detection_ids: detectionIds })
             })
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
+                    setActiveTab('#enroll');
                     location.reload();
                 } else {
                     alert('Error: ' + (data.error || 'Unknown error'));
@@ -159,6 +243,18 @@
             })
             .catch(err => alert('Request failed: ' + err));
         }
+
+        document.querySelectorAll('[id^="selection-summary-"]').forEach(el => {
+            updateSelectionSummary(el.id.replace('selection-summary-', ''));
+        });
+
+        document.querySelectorAll('[data-bs-toggle="tab"]').forEach(tabButton => {
+            tabButton.addEventListener('shown.bs.tab', event => {
+                setActiveTab(event.target.getAttribute('data-bs-target'));
+            });
+        });
+
+        restoreActiveTab();
     </script>
 </body>
 </html>

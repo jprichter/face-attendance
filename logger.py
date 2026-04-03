@@ -155,20 +155,38 @@ def find_matching_unknown_group(embedding):
 
 
 def get_unknown_groups():
-    """Get summary of unknown face groups for the dashboard."""
+    """Get unknown face groups with their selectable detections for the dashboard."""
     try:
         with _db_cursor() as cur:
             cur.execute(
-                "SELECT ud.group_id, MIN(ud.image_path) AS image_path, "
-                "COUNT(*) AS seen_count, "
-                "MIN(ud.detected_at) AS first_seen, "
-                "MAX(ud.detected_at) AS last_seen "
+                "SELECT ud.id, ud.group_id, ud.image_path, ud.detected_at "
                 "FROM unknown_detections ud "
                 "WHERE ud.group_id IS NOT NULL "
-                "GROUP BY ud.group_id "
-                "ORDER BY MAX(ud.detected_at) DESC"
+                "ORDER BY ud.group_id, ud.detected_at DESC"
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+
+        groups = {}
+        for detection_id, group_id, image_path, detected_at in rows:
+            group = groups.setdefault(group_id, {
+                "group_id": group_id,
+                "seen_count": 0,
+                "first_seen": detected_at,
+                "last_seen": detected_at,
+                "detections": [],
+            })
+            group["seen_count"] += 1
+            if detected_at < group["first_seen"]:
+                group["first_seen"] = detected_at
+            if detected_at > group["last_seen"]:
+                group["last_seen"] = detected_at
+            group["detections"].append({
+                "id": detection_id,
+                "image_path": image_path,
+                "detected_at": detected_at,
+            })
+
+        return sorted(groups.values(), key=lambda group: group["last_seen"], reverse=True)
     except Exception as e:
         print(f"Error fetching unknown groups: {e}")
         return []
@@ -191,7 +209,6 @@ def get_attendance_logs(limit=100):
     except Exception as exc:
         print(f"Error fetching attendance logs: {exc}")
         return []
-
 
 def archive_old_attendance():
     """Move attendance records older than the session window to the archive table."""
@@ -218,6 +235,21 @@ def archive_old_attendance():
         return 0
 
 
+def get_member_names():
+    """Fetch member names for enrollment suggestions."""
+    try:
+        with _db_cursor() as cur:
+            cur.execute(
+                "SELECT id, name "
+                "FROM members "
+                "ORDER BY LOWER(name) ASC"
+            )
+            return cur.fetchall()
+    except Exception as e:
+        print(f"Error fetching member names: {e}")
+        return []
+
+
 def _delete_snapshot_files(image_paths):
     """Remove snapshot image files from disk, ignoring missing files."""
     for path in image_paths:
@@ -237,6 +269,32 @@ def _get_group_image_paths(cur, group_id):
     return [row[0] for row in cur.fetchall()]
 
 
+def _normalize_detection_ids(detection_ids):
+    if not detection_ids:
+        return []
+    normalized = []
+    for detection_id in detection_ids:
+        try:
+            normalized.append(int(detection_id))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(normalized))
+
+
+def _get_selected_detections(cur, group_id, detection_ids):
+    normalized_ids = _normalize_detection_ids(detection_ids)
+    if not normalized_ids:
+        return []
+
+    cur.execute(
+        "SELECT id, face_embedding, image_path "
+        "FROM unknown_detections "
+        "WHERE group_id = %s AND id = ANY(%s)",
+        (group_id, normalized_ids),
+    )
+    return cur.fetchall()
+
+
 def _parse_embedding(value):
     """Parse an embedding from pgvector, which may be a string or a list."""
     if isinstance(value, str):
@@ -244,50 +302,76 @@ def _parse_embedding(value):
     return value
 
 
-def enroll_from_unknown(group_id, name):
-    """Enroll a member from unknown detection group. Returns member_id or None."""
+def _find_member_by_name(cur, name):
+    cur.execute(
+        "SELECT id, name, face_embedding "
+        "FROM members "
+        "WHERE LOWER(TRIM(name)) = LOWER(TRIM(%s)) "
+        "LIMIT 1",
+        (name,),
+    )
+    return cur.fetchone()
+
+
+def enroll_from_unknown(group_id, name, detection_ids):
+    """Create or update a member from selected detections within an unknown group."""
     try:
         with _db_cursor(commit=True) as cur:
-            cur.execute(
-                "SELECT face_embedding FROM unknown_detections WHERE group_id = %s",
-                (group_id,),
-            )
-            rows = cur.fetchall()
+            rows = _get_selected_detections(cur, group_id, detection_ids)
             if not rows:
                 return None
 
-            embeddings = [np.array(_parse_embedding(row[0])) for row in rows]
-            avg_embedding = np.mean(embeddings, axis=0).tolist()
+            selected_ids = [row[0] for row in rows]
+            embeddings = [np.array(_parse_embedding(row[1])) for row in rows]
+            selected_embedding = np.mean(embeddings, axis=0)
+            image_paths = [row[2] for row in rows]
+
+            existing_member = _find_member_by_name(cur, name)
+            if existing_member:
+                member_id = existing_member[0]
+                existing_embedding = np.array(_parse_embedding(existing_member[2]))
+                merged_embedding = np.mean([existing_embedding, selected_embedding], axis=0).tolist()
+                cur.execute(
+                    "UPDATE members SET face_embedding = %s WHERE id = %s",
+                    (merged_embedding, member_id),
+                )
+                action = "updated"
+            else:
+                cur.execute(
+                    "INSERT INTO members (name, face_embedding) VALUES (%s, %s) RETURNING id",
+                    (name, selected_embedding.tolist()),
+                )
+                member_id = cur.fetchone()[0]
+                action = "created"
 
             cur.execute(
-                "INSERT INTO members (name, face_embedding) VALUES (%s, %s) RETURNING id",
-                (name, avg_embedding),
-            )
-            member_id = cur.fetchone()[0]
-
-            image_paths = _get_group_image_paths(cur, group_id)
-
-            cur.execute(
-                "DELETE FROM unknown_detections WHERE group_id = %s",
-                (group_id,),
+                "DELETE FROM unknown_detections "
+                "WHERE group_id = %s AND id = ANY(%s)",
+                (group_id, selected_ids),
             )
 
         _delete_snapshot_files(image_paths)
-        return member_id
+        return {"member_id": member_id, "action": action}
     except Exception as e:
         print(f"Error enrolling from unknown: {e}")
         return None
 
 
-def dismiss_unknown_group(group_id):
-    """Delete an unknown group and its snapshots. Returns True on success."""
+def dismiss_unknown_group(group_id, detection_ids):
+    """Delete selected detections from an unknown group. Returns True on success."""
     try:
         with _db_cursor(commit=True) as cur:
-            image_paths = _get_group_image_paths(cur, group_id)
+            rows = _get_selected_detections(cur, group_id, detection_ids)
+            if not rows:
+                return False
+
+            selected_ids = [row[0] for row in rows]
+            image_paths = [row[2] for row in rows]
 
             cur.execute(
-                "DELETE FROM unknown_detections WHERE group_id = %s",
-                (group_id,),
+                "DELETE FROM unknown_detections "
+                "WHERE group_id = %s AND id = ANY(%s)",
+                (group_id, selected_ids),
             )
 
         _delete_snapshot_files(image_paths)

@@ -8,6 +8,7 @@ from logger import (
     enroll_from_unknown,
     find_matching_unknown_group,
     get_attendance_logs,
+    get_member_names,
     get_unknown_groups,
     log_check_in,
     log_unknown_detection,
@@ -84,13 +85,18 @@ def test_find_matching_unknown_group_empty_table(mock_db_conn):
 def test_get_unknown_groups(mock_db_conn):
     _mock_connect, mock_cur = mock_db_conn
 
-    expected = [
-        ("group-1", "data/unknown/img1.jpg", 3, datetime(2023, 10, 27, 10, 0), datetime(2023, 10, 27, 10, 15)),
+    mock_cur.fetchall.return_value = [
+        (1, "group-1", "data/unknown/img2.jpg", datetime(2023, 10, 27, 10, 15)),
+        (2, "group-1", "data/unknown/img1.jpg", datetime(2023, 10, 27, 10, 0)),
     ]
-    mock_cur.fetchall.return_value = expected
 
     result = get_unknown_groups()
-    assert result == expected
+    assert len(result) == 1
+    assert result[0]["group_id"] == "group-1"
+    assert result[0]["seen_count"] == 2
+    assert result[0]["first_seen"] == datetime(2023, 10, 27, 10, 0)
+    assert result[0]["last_seen"] == datetime(2023, 10, 27, 10, 15)
+    assert result[0]["detections"][0]["id"] == 1
 
 
 def test_get_unknown_groups_empty(mock_db_conn):
@@ -101,19 +107,47 @@ def test_get_unknown_groups_empty(mock_db_conn):
     assert result == []
 
 
+def test_get_member_names(mock_db_conn):
+    _mock_connect, mock_cur = mock_db_conn
+    mock_cur.fetchall.return_value = [(2, "Jane Smith"), (1, "John Doe")]
+
+    result = get_member_names()
+    assert result == [(2, "Jane Smith"), (1, "John Doe")]
+
+
 def test_enroll_from_unknown_success(mock_db_conn, mocker):
     _mock_connect, mock_cur = mock_db_conn
     mocker.patch("os.path.isfile", return_value=True)
     mocker.patch("os.unlink")
 
     mock_cur.fetchall.side_effect = [
-        [([0.1] * 512,), ([0.2] * 512,)],  # embeddings
-        [("data/unknown/img1.jpg",)],         # image paths
+        [
+            (10, [0.1] * 512, "data/unknown/img1.jpg"),
+            (11, [0.2] * 512, "data/unknown/img2.jpg"),
+        ],
     ]
-    mock_cur.fetchone.return_value = (42,)    # member_id
+    mock_cur.fetchone.side_effect = [None, (42,)]
 
-    result = enroll_from_unknown("group-uuid-1", "John Doe")
-    assert result == 42
+    result = enroll_from_unknown("group-uuid-1", "John Doe", [10, 11])
+    assert result == {"member_id": 42, "action": "created"}
+
+
+def test_enroll_from_unknown_updates_existing_member(mock_db_conn, mocker):
+    _mock_connect, mock_cur = mock_db_conn
+    mocker.patch("os.path.isfile", return_value=True)
+    mocker.patch("os.unlink")
+
+    mock_cur.fetchall.side_effect = [
+        [
+            (10, [0.1] * 512, "data/unknown/img1.jpg"),
+            (11, [0.3] * 512, "data/unknown/img2.jpg"),
+        ],
+    ]
+    mock_cur.fetchone.return_value = (7, "John Doe", [0.5] * 512)
+
+    result = enroll_from_unknown("group-uuid-1", "John Doe", [10, 11])
+    assert result == {"member_id": 7, "action": "updated"}
+    assert any("UPDATE members SET face_embedding" in call[0][0] for call in mock_cur.execute.call_args_list)
 
 
 def test_enroll_from_unknown_no_detections(mock_db_conn):
@@ -121,7 +155,7 @@ def test_enroll_from_unknown_no_detections(mock_db_conn):
 
     mock_cur.fetchall.return_value = []
 
-    result = enroll_from_unknown("nonexistent", "John Doe")
+    result = enroll_from_unknown("nonexistent", "John Doe", [999])
     assert result is None
 
 
@@ -130,9 +164,9 @@ def test_dismiss_unknown_group_success(mock_db_conn, mocker):
     mocker.patch("os.path.isfile", return_value=True)
     mocker.patch("os.unlink")
 
-    mock_cur.fetchall.return_value = [("data/unknown/img1.jpg",)]
+    mock_cur.fetchall.return_value = [(10, [0.1] * 512, "data/unknown/img1.jpg")]
 
-    result = dismiss_unknown_group("group-uuid-1")
+    result = dismiss_unknown_group("group-uuid-1", [10])
     assert result is True
 
 
@@ -141,7 +175,7 @@ def test_dismiss_unknown_group_db_error(mock_db_conn):
 
     mock_cur.execute.side_effect = Exception("DB error")
 
-    result = dismiss_unknown_group("group-uuid-1")
+    result = dismiss_unknown_group("group-uuid-1", [10])
     assert result is False
 
 

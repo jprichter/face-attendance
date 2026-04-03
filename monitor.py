@@ -1,6 +1,5 @@
 import os
 import psycopg2
-import threading
 import uuid
 from datetime import datetime
 
@@ -9,7 +8,6 @@ import numpy as np
 from deepface import DeepFace
 
 import config
-from app import app
 from logger import (
     find_matching_unknown_group,
     log_check_in,
@@ -289,20 +287,9 @@ def process_frame_two_stage(frame, yunet, confirmation_buffer):
     return display_frame
 
 
-def start_web_server():
-    """Start the Flask web server in a background thread."""
-    try:
-        app.run(host="0.0.0.0", port=config.FLASK_PORT, debug=False, use_reloader=False)
-    except Exception as e:
-        print(f"Failed to start web server: {e}")
-
-
 def main():
-    web_thread = threading.Thread(target=start_web_server, daemon=True)
-    web_thread.start()
-
     print("\n--- Face Attendance Monitoring ---")
-    print(f"Log Viewer available at: http://localhost:{config.FLASK_PORT}")
+    print(f"Dashboard available separately at: http://localhost:{config.FLASK_PORT}")
     print("Press 'q' in the camera window or Ctrl+C to exit.\n")
 
     cap = cv2.VideoCapture(config.CAMERA_SOURCE)
