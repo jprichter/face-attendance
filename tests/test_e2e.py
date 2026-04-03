@@ -8,7 +8,6 @@ from monitor import main as monitor_main, handle_recognition
 def mock_monitor_infra(mocker):
     """Mock blocking infrastructure in monitor.py for all tests in this module."""
     mocker.patch("builtins.input", return_value="n")
-    mocker.patch("monitor.threading.Thread")
     return
 
 
